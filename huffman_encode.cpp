@@ -23,7 +23,7 @@ struct stHuffNode
     const stHuffNode * const m_left;
     const stHuffNode * const m_right;
 private:
-    stHuffNode(uchar uc, size_t freq, stHuffNode *left, stHuffNode * right)
+    stHuffNode(uchar uc, size_t freq, const stHuffNode *left, const stHuffNode *right)
         :m_uchar(uc)
         ,m_freq(freq)
         ,m_bitRep(0)
@@ -47,8 +47,8 @@ public:
         return nullptr == m_left && nullptr == m_right;
     }
 
-    static stHuffNode *
-    create_node(uchar ch, size_t freq, stHuffNode *left, stHuffNode *right)
+    static const stHuffNode *
+    create_node(uchar ch, size_t freq, const stHuffNode *left, const stHuffNode *right)
     {
         return new stHuffNode(ch, freq, left, right);
     }
@@ -135,7 +135,7 @@ _count_all_enc_bit_r(size_t *nCount, const stHuffNode *pNode)
     _count_all_enc_bit_r(nCount, pNode->m_right);
 }
 
-static stHuffNode *
+static const stHuffNode *
 _build_huffman_tree(const uchar *pData, size_t nLen)
 {
     assert(nLen >= 1);
@@ -143,7 +143,7 @@ _build_huffman_tree(const uchar *pData, size_t nLen)
     size_t freq_array[g_charSize] = {0};
     _count_freq(freq_array, pData, nLen);
 
-    using MinHeap = std::priority_queue<stHuffNode*, std::vector<stHuffNode*>, stHuffNodeCMP>;
+    using MinHeap = std::priority_queue<const stHuffNode*, std::vector<const stHuffNode*>, stHuffNodeCMP>;
     MinHeap heap;
     for (size_t ch=0; ch<g_charSize; ++ch)
     {
@@ -211,6 +211,7 @@ _tree_to_array_r(const stHuffNode **arr, const stHuffNode *pNode)
         assert(nullptr == arr[pNode->m_uchar]);
 
         arr[pNode->m_uchar] = pNode;
+        return;
     }
 
     _tree_to_array_r(arr, pNode->m_left);
@@ -381,6 +382,7 @@ _print_tree(const stHuffNode *pNode)
     if (pNode->is_leaf())
     {
         _print_Node(pNode);
+        return;
     }
     _print_tree(pNode->m_left);
     _print_tree(pNode->m_right);
@@ -404,7 +406,7 @@ encode(const char *pData, size_t nLen)
     auto pRoot = _build_huffman_tree(pUChar, nLen);
 
 #ifndef NDEBUG
-    //_print_tree(pRoot);
+    _print_tree(pRoot);
 #endif
 
     auto pImpl = new stEncodeInfoImpl;
