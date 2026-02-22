@@ -1,0 +1,467 @@
+#include "huffman_encode.h"
+#include <limits>
+#include <string.h>
+#include <queue>
+#include <bit>
+#include <stdio.h>
+#include <string>
+#include <stdint.h>
+#include <assert.h>
+
+namespace
+{
+
+using uchar = unsigned char;
+static constexpr size_t g_charSize = 256;
+
+struct stHuffNode
+{
+    const uchar  m_uchar;
+    const size_t m_freq;
+    const uint64_t m_bitRep;
+    const size_t   m_bitNum;
+    const stHuffNode * const m_left;
+    const stHuffNode * const m_right;
+private:
+    stHuffNode(uchar uc, size_t freq, stHuffNode *left, stHuffNode * right)
+        :m_uchar(uc)
+        ,m_freq(freq)
+        ,m_bitRep(0)
+        ,m_bitNum(0)
+        ,m_left(left)
+        ,m_right(right)
+    {}
+public:
+
+    void init_rep_bit(uint64_t rep, size_t num) const
+    {
+        assert(num >= 1);
+        assert(0 == m_bitRep);
+        assert(0 == m_bitNum);
+        const_cast<uint64_t&>(m_bitRep) = rep;
+        const_cast<uint64_t&>(m_bitNum) = num;
+    }
+
+    bool is_leaf() const
+    {
+        return nullptr == m_left && nullptr == m_right;
+    }
+
+    static stHuffNode *
+    create_node(uchar ch, size_t freq, stHuffNode *left, stHuffNode *right)
+    {
+        return new stHuffNode(ch, freq, left, right);
+    }
+
+    static void free_node_r(const stHuffNode *pNode)
+    {
+        if (nullptr != pNode)
+        {
+            free_node_r(pNode->m_left);
+            free_node_r(pNode->m_right);
+            delete pNode;
+        }
+    }
+};
+
+struct stHuffNodeCMP
+{
+    bool operator()(const stHuffNode *n1, const stHuffNode *n2) const noexcept
+    {
+        return n1->m_freq > n2->m_freq;
+    }
+};
+
+struct stEncodeInfoImpl
+{
+    size_t m_origCharSize;
+    size_t m_encBitSize;
+    const stHuffNode *m_root;
+    std::vector<uint64_t> m_encVec;
+};
+
+static void
+_set_rep_r(const stHuffNode *pNode, uint64_t bitRep, size_t nBitNum)
+{
+    if (nullptr == pNode)
+    {
+        return;
+    }
+
+    if (pNode->is_leaf())
+    {
+        assert(nBitNum >= 1);
+
+        pNode->init_rep_bit(bitRep, nBitNum);
+        return;
+    }
+
+    bitRep <<= 1;
+    ++nBitNum;
+
+    _set_rep_r(pNode->m_left,  bitRep,       nBitNum);
+    _set_rep_r(pNode->m_right, bitRep | 0x1, nBitNum);
+}
+
+static void
+_count_freq(size_t *arr, const uchar *pData, size_t nLen)
+{
+    const uchar *beg = pData;
+    const uchar *end = beg + nLen;
+
+    for (; beg != end; ++beg)
+    {
+        ++arr[*beg];
+    }
+}
+
+static void
+_count_all_enc_bit_r(size_t *nCount, const stHuffNode *pNode)
+{
+    if (nullptr == pNode)
+    {
+        return;
+    }
+
+    if (pNode->is_leaf())
+    {
+        *nCount += pNode->m_bitNum * pNode->m_freq;
+        return;
+    }
+
+    _count_all_enc_bit_r(nCount, pNode->m_left);
+    _count_all_enc_bit_r(nCount, pNode->m_right);
+}
+
+static stHuffNode *
+_build_huffman_tree(const uchar *pData, size_t nLen)
+{
+    assert(nLen >= 1);
+
+    size_t freq_array[g_charSize] = {0};
+    _count_freq(freq_array, pData, nLen);
+
+    using MinHeap = std::priority_queue<stHuffNode*, std::vector<stHuffNode*>, stHuffNodeCMP>;
+    MinHeap heap;
+    for (size_t ch=0; ch<g_charSize; ++ch)
+    {
+        size_t freq = freq_array[ch];
+        if (0 == freq)
+        {
+            continue;
+        }
+
+        auto pNode = stHuffNode::create_node(ch, freq, nullptr, nullptr);
+        heap.push(pNode);
+    }
+
+    assert(heap.size() >= 1);
+
+    constexpr uchar g_parentChar = 0;
+
+    if (heap.size() == 1)
+    {
+        auto pNode = heap.top();
+        heap.pop();
+        auto pParent = stHuffNode::create_node(g_parentChar, pNode->m_freq, pNode, nullptr);
+        heap.push(pParent);
+    }
+    else
+    {
+        while (heap.size() != 1)
+        {
+            assert(heap.size() >= 2);
+
+            auto pLeft = heap.top();
+            heap.pop();
+            auto pRight = heap.top();
+            heap.pop();
+
+            size_t freq = pLeft->m_freq + pRight->m_freq;
+
+            auto pParent = stHuffNode::create_node(g_parentChar, freq, pLeft, pRight);
+
+            heap.push(pParent);
+        }
+    }
+
+    assert(heap.size() == 1);
+
+    auto pRoot = heap.top();
+
+    assert(false == pRoot->is_leaf());
+
+    _set_rep_r(pRoot, 0, 0);
+
+    return pRoot;
+}
+
+static void
+_tree_to_array_r(const stHuffNode **arr, const stHuffNode *pNode)
+{
+    if (nullptr == pNode)
+    {
+        return;
+    }
+
+    if (pNode->is_leaf())
+    {
+        assert(nullptr == arr[pNode->m_uchar]);
+
+        arr[pNode->m_uchar] = pNode;
+    }
+
+    _tree_to_array_r(arr, pNode->m_left);
+    _tree_to_array_r(arr, pNode->m_right);
+}
+
+struct stBitVector
+{
+    std::vector<uint64_t> *m_vec;
+    size_t                 m_leftBitCount;
+    uint64_t               m_curBitFlag;
+
+    void init_flag()
+    {
+        m_leftBitCount = 64;
+        m_curBitFlag   = 0;
+    }
+
+    void push(uint64_t flag)
+    {
+        assert(0 == flag || 1 == flag);
+        assert(m_leftBitCount > 0);
+
+        --m_leftBitCount;
+
+        m_curBitFlag |= flag << m_leftBitCount;
+
+        if (0 == m_leftBitCount)
+        {
+            m_vec->push_back(m_curBitFlag);
+            init_flag();
+        }
+    }
+
+    void finish_flag()
+    {
+        if (64 != m_leftBitCount)
+        {
+            m_vec->push_back(m_curBitFlag);
+            init_flag();
+        }
+    }
+};
+
+static void
+_enc_to_vec(std::vector<uint64_t> *encVec,
+            const stHuffNode *pRoot,
+            const uchar *pData,
+            size_t nLen)
+{
+    assert(encVec->empty());
+
+    const stHuffNode *nodeArr[g_charSize] = {nullptr};
+    _tree_to_array_r(nodeArr, pRoot);
+
+    stBitVector bitVec;
+    bitVec.m_vec = encVec;
+    bitVec.init_flag();
+
+    auto beg = pData;
+    auto end = beg + nLen;
+    for (; beg != end; ++beg)
+    {
+        auto pNode = nodeArr[*beg];
+
+        assert(pNode);
+
+        for (int flagNum=pNode->m_bitNum-1; flagNum>=0; --flagNum)
+        {
+            uint64_t flag = (pNode->m_bitRep >> flagNum) & 0x1;
+            bitVec.push(flag);
+        }
+    }
+
+    bitVec.finish_flag();
+}
+
+static bool
+_dec_to_vec(std::vector<char> *outVec,
+            const stEncodeInfoImpl *pImpl)
+{
+    size_t nOldSize = outVec->size();
+    outVec->reserve(nOldSize + pImpl->m_origCharSize);
+
+    size_t nBitCount = pImpl->m_encBitSize;
+    auto pNode = pImpl->m_root;
+
+    for (uint64_t flag : pImpl->m_encVec)
+    {
+        for (int i=63; i>=0; --i)
+        {
+            if (0 == nBitCount)
+            {
+                return false;
+            }
+
+            --nBitCount;
+
+            bool isOne = (flag >> i) & 0x1;
+            if (isOne)
+            {
+                pNode = pNode->m_right;
+            }
+            else
+            {
+                pNode = pNode->m_left;
+            }
+
+            if (nullptr == pNode)
+            {
+                return false;
+            }
+
+            if (pNode->is_leaf())
+            {
+                outVec->push_back(pNode->m_uchar);
+                pNode = pImpl->m_root;
+
+                if (0 == nBitCount)
+                {
+                    return outVec->size() - nOldSize == pImpl->m_origCharSize;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+#ifndef NDEBUG
+
+static void
+_print_Node(const stHuffNode *pNode)
+{
+    if (isprint(pNode->m_uchar))
+    {
+        printf("\'%c\' %3d : b = \'", pNode->m_uchar, pNode->m_uchar);
+    }
+    else
+    {
+        printf("\'%c\' %3d : b = \'", ' ', pNode->m_uchar);
+    }
+
+    uint64_t c = pNode->m_bitRep;
+    if (0 == pNode->m_bitNum)
+    {
+        printf("0");
+    }
+    else
+    {
+        for (int i = pNode->m_bitNum - 1; i >= 0; --i)
+        {
+            bool b = c & (uint64_t(1) << i);
+            int n = b ? 1 : 0;
+            printf("%d", n);
+        }
+    }
+    printf("\' n = %d f = %d\n", pNode->m_bitNum, pNode->m_freq);
+}
+
+static void
+_print_tree(const stHuffNode *pNode)
+{
+    if (nullptr == pNode)
+    {
+        return;
+    }
+
+    if (pNode->is_leaf())
+    {
+        _print_Node(pNode);
+    }
+    _print_tree(pNode->m_left);
+    _print_tree(pNode->m_right);
+}
+#endif
+
+}
+
+namespace huffman_encode
+{
+
+const huffman_encode_info *
+encode(const char *pData, size_t nLen)
+{
+    if (0 == nLen)
+    {
+        return nullptr;
+    }
+
+    const uchar *pUChar = reinterpret_cast<const uchar *>(pData);
+    auto pRoot = _build_huffman_tree(pUChar, nLen);
+
+#ifndef NDEBUG
+    //_print_tree(pRoot);
+#endif
+
+    auto pImpl = new stEncodeInfoImpl;
+
+    size_t nEncBitCount = 0;
+    _count_all_enc_bit_r(&nEncBitCount, pRoot);
+
+    pImpl->m_encVec.reserve(nEncBitCount / 64);
+
+    _enc_to_vec(&pImpl->m_encVec, pRoot, pUChar, nLen);
+
+    pImpl->m_origCharSize = nLen;
+    pImpl->m_encBitSize   = nEncBitCount;
+    pImpl->m_root         = pRoot;
+
+    huffman_encode_info *pInfo = reinterpret_cast<huffman_encode_info*>(pImpl);
+
+#ifndef NDEBUG
+    printf("orig = %d, enc = %d\n", nLen, (pImpl->m_encBitSize + 7) / 8);
+    {
+        std::vector<char> outVec;
+        bool b = decode(&outVec, pInfo);
+        assert(b);
+        assert(outVec.size() == nLen);
+        assert(0 == strncmp(pData, outVec.data(), nLen));
+    }
+#endif
+
+    return pInfo;
+}
+
+bool
+decode(std::vector<char> *outVec, const huffman_encode_info *info)
+{
+    if (nullptr == info)
+    {
+        return true;
+    }
+
+    auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
+
+    return _dec_to_vec(outVec, pImpl);
+}
+
+void
+destory_info(const huffman_encode_info *info)
+{
+    if (nullptr == info)
+    {
+        return;
+    }
+
+    auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
+
+    assert(pImpl->m_root);
+
+    stHuffNode::free_node_r(pImpl->m_root);
+    delete pImpl;
+}
+
+}
