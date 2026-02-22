@@ -28,7 +28,7 @@ _rand_test(size_t nLen, int k)
     {
         auto info = huffman_encode::encode(str.c_str(), str.size());
         std::vector<char> outVec;
-        bool b = huffman_encode::decode(&outVec, info);
+        bool b = huffman_encode::decode_to_vec(&outVec, info);
         assert(b);
         assert(outVec.size() == str.size());
         assert(0 == ::strncmp(str.c_str(), outVec.data(), str.size()));
@@ -55,24 +55,54 @@ int main()
     {
         string str = "";
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 
     {
         string str = "a";
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
+        huffman_encode::destory_info(info);
+    }
+    {
+        string str = "aa";
+        auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 
     {
-        string str = "aaa";
+        string str = "abc";
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 
     {
-        string str = "aabbbcccc";
+        string str = "abc aa bbb cccc";
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 
@@ -86,6 +116,11 @@ int main()
         str.insert(str.size(), 45, 'f');
         cout << str << endl;
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 #if 1
@@ -99,6 +134,11 @@ int main()
         //assert(str.size() == 256);
 
         auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
         huffman_encode::destory_info(info);
     }
 #endif

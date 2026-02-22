@@ -74,10 +74,12 @@ struct stHuffNodeCMP
 
 struct stEncodeInfoImpl
 {
-    size_t m_origCharSize;
-    size_t m_encBitSize;
-    const stHuffNode *m_root;
-    std::vector<uint64_t> m_encVec;
+    size_t m_origCharSize = 0;
+    size_t m_encBitSize = 0;
+    const stHuffNode *m_root = nullptr;
+    size_t     m_encBuffSize = 0;
+    uint64_t  *m_encBuff = nullptr;
+
 };
 
 static void
@@ -217,9 +219,9 @@ _tree_to_array_r(const stHuffNode **arr, const stHuffNode *pNode)
 
 struct stBitVector
 {
-    std::vector<uint64_t> *m_vec;
-    size_t                 m_leftBitCount;
-    uint64_t               m_curBitFlag;
+    uint64_t *m_buff;
+    size_t    m_leftBitCount;
+    uint64_t  m_curBitFlag;
 
     void init_flag()
     {
@@ -238,7 +240,7 @@ struct stBitVector
 
         if (0 == m_leftBitCount)
         {
-            m_vec->push_back(m_curBitFlag);
+            *m_buff++ = m_curBitFlag;
             init_flag();
         }
     }
@@ -247,25 +249,23 @@ struct stBitVector
     {
         if (64 != m_leftBitCount)
         {
-            m_vec->push_back(m_curBitFlag);
+            *m_buff++ = m_curBitFlag;
             init_flag();
         }
     }
 };
 
 static void
-_enc_to_vec(std::vector<uint64_t> *encVec,
+_enc_to_vec(uint64_t *buff,
             const stHuffNode *pRoot,
             const uchar *pData,
             size_t nLen)
 {
-    assert(encVec->empty());
-
     const stHuffNode *nodeArr[g_charSize] = {nullptr};
     _tree_to_array_r(nodeArr, pRoot);
 
     stBitVector bitVec;
-    bitVec.m_vec = encVec;
+    bitVec.m_buff = buff;
     bitVec.init_flag();
 
     auto beg = pData;
@@ -287,17 +287,18 @@ _enc_to_vec(std::vector<uint64_t> *encVec,
 }
 
 static bool
-_dec_to_vec(std::vector<char> *outVec,
-            const stEncodeInfoImpl *pImpl)
+_dec_to_buff(char *outIter,
+             const stEncodeInfoImpl *pImpl)
 {
-    size_t nOldSize = outVec->size();
-    outVec->reserve(nOldSize + pImpl->m_origCharSize);
-
+    char *oldOutIter = outIter;
     size_t nBitCount = pImpl->m_encBitSize;
     auto pNode = pImpl->m_root;
 
-    for (uint64_t flag : pImpl->m_encVec)
+    const uint64_t *beg = pImpl->m_encBuff;
+    const uint64_t *end = beg + pImpl->m_encBuffSize;
+    for (; beg != end; ++beg)
     {
+        uint64_t flag = *beg;
         for (int i=63; i>=0; --i)
         {
             if (0 == nBitCount)
@@ -324,12 +325,12 @@ _dec_to_vec(std::vector<char> *outVec,
 
             if (pNode->is_leaf())
             {
-                outVec->push_back(pNode->m_uchar);
+                *outIter++ = pNode->m_uchar;
                 pNode = pImpl->m_root;
 
                 if (0 == nBitCount)
                 {
-                    return outVec->size() - nOldSize == pImpl->m_origCharSize;
+                    return outIter - oldOutIter == pImpl->m_origCharSize;
                 }
             }
         }
@@ -411,13 +412,17 @@ encode(const char *pData, size_t nLen)
     size_t nEncBitCount = 0;
     _count_all_enc_bit_r(&nEncBitCount, pRoot);
 
-    pImpl->m_encVec.reserve(nEncBitCount / 64);
+    size_t nEncBuffSize = (nEncBitCount + 63) / 64;
 
-    _enc_to_vec(&pImpl->m_encVec, pRoot, pUChar, nLen);
+    uint64_t *pBuff = reinterpret_cast<uint64_t*>(::malloc(nEncBuffSize * sizeof (uint64_t)));
+
+    _enc_to_vec(pBuff, pRoot, pUChar, nLen);
 
     pImpl->m_origCharSize = nLen;
     pImpl->m_encBitSize   = nEncBitCount;
     pImpl->m_root         = pRoot;
+    pImpl->m_encBuff      = pBuff;
+    pImpl->m_encBuffSize  = nEncBuffSize;
 
     huffman_encode_info *pInfo = reinterpret_cast<huffman_encode_info*>(pImpl);
 
@@ -425,7 +430,7 @@ encode(const char *pData, size_t nLen)
     printf("orig = %d, enc = %d\n", nLen, (pImpl->m_encBitSize + 7) / 8);
     {
         std::vector<char> outVec;
-        bool b = decode(&outVec, pInfo);
+        bool b = decode_to_vec(&outVec, pInfo);
         assert(b);
         assert(outVec.size() == nLen);
         assert(0 == strncmp(pData, outVec.data(), nLen));
@@ -436,7 +441,7 @@ encode(const char *pData, size_t nLen)
 }
 
 bool
-decode(std::vector<char> *outVec, const huffman_encode_info *info)
+decode_to(char *buff, const huffman_encode_info *info)
 {
     if (nullptr == info)
     {
@@ -445,7 +450,24 @@ decode(std::vector<char> *outVec, const huffman_encode_info *info)
 
     auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
 
-    return _dec_to_vec(outVec, pImpl);
+    return _dec_to_buff(buff, pImpl);
+}
+
+bool
+decode_to_vec(std::vector<char> *outVec, const huffman_encode_info *info)
+{
+    if (nullptr == info)
+    {
+        return true;
+    }
+
+    auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
+
+    //make enough space
+    auto oldSize = outVec->size();
+    outVec->resize(oldSize + pImpl->m_origCharSize);
+
+    return _dec_to_buff(outVec->data() + oldSize, pImpl);
 }
 
 void
@@ -459,9 +481,23 @@ destory_info(const huffman_encode_info *info)
     auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
 
     assert(pImpl->m_root);
+    assert(pImpl->m_encBuff);
 
     stHuffNode::free_node_r(pImpl->m_root);
+    ::free(pImpl->m_encBuff);
     delete pImpl;
+}
+
+size_t
+get_orig_len(const huffman_encode_info *info)
+{
+    if (nullptr == info)
+    {
+        return 0;
+    }
+
+    auto pImpl = reinterpret_cast<const stEncodeInfoImpl*>(info);
+    return pImpl->m_origCharSize;
 }
 
 }
