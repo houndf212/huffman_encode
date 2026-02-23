@@ -107,6 +107,18 @@ int main()
     }
 
     {
+        string str;
+        str.append(128, 'A');
+        auto info = huffman_encode::encode(str.c_str(), str.size());
+        string decStr;
+        decStr.resize(huffman_encode::get_orig_len(info), '\0');
+        bool b = huffman_encode::decode_to(decStr.data(), info);
+        assert(b);
+        assert(str == decStr);
+        huffman_encode::destory_info(info);
+    }
+
+    {
         std::string str;
         str.insert(str.size(), 5, 'a');
         str.insert(str.size(), 9, 'b');

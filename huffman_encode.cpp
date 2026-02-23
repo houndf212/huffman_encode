@@ -229,7 +229,7 @@ struct stBitVector
         m_leftBitCount = 64;
         m_curBitFlag   = 0;
     }
-
+#if 0
     void push(uint64_t flag)
     {
         assert(0 == flag || 1 == flag);
@@ -245,13 +245,41 @@ struct stBitVector
             init_flag();
         }
     }
-
+#endif
     void finish_flag()
     {
         if (64 != m_leftBitCount)
         {
             *m_buff++ = m_curBitFlag;
             init_flag();
+        }
+    }
+
+    void append_node(const stHuffNode *pNode)
+    {
+        assert(1 <= pNode->m_bitNum && pNode->m_bitNum <= 64);
+        assert(m_leftBitCount > 0);
+
+        if (m_leftBitCount > pNode->m_bitNum)
+        {
+            m_leftBitCount -= pNode->m_bitNum;
+            m_curBitFlag |= pNode->m_bitRep << m_leftBitCount;
+        }
+        else if (m_leftBitCount == pNode->m_bitNum)
+        {
+            m_curBitFlag |= pNode->m_bitRep;
+            *m_buff++ = m_curBitFlag;
+            init_flag();
+        }
+        else
+        {
+            size_t unAppendBit = pNode->m_bitNum - m_leftBitCount;
+            assert(unAppendBit < 64);
+            m_curBitFlag |= pNode->m_bitRep >> unAppendBit;
+            *m_buff++ = m_curBitFlag;
+            m_leftBitCount = 64 - unAppendBit;
+            assert(0 != m_leftBitCount);
+            m_curBitFlag   = pNode->m_bitRep << m_leftBitCount;
         }
     }
 };
@@ -276,12 +304,14 @@ _enc_to_vec(uint64_t *buff,
         auto pNode = nodeArr[*beg];
 
         assert(pNode);
-
+#if 0
         for (int flagNum=pNode->m_bitNum-1; flagNum>=0; --flagNum)
         {
             uint64_t flag = (pNode->m_bitRep >> flagNum) & 0x1;
             bitVec.push(flag);
         }
+#endif
+        bitVec.append_node(pNode);
     }
 
     bitVec.finish_flag();
