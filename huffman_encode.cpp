@@ -398,7 +398,7 @@ _print_Node(const stHuffNode *pNode)
             printf("%d", n);
         }
     }
-    printf("\' n = %d f = %d\n", pNode->m_bitNum, pNode->m_freq);
+    printf("\' n = %lu f = %lu\n", pNode->m_bitNum, pNode->m_freq);
 }
 
 static void
@@ -459,7 +459,7 @@ encode(const char *pData, size_t nLen)
     huffman_encode_info *pInfo = reinterpret_cast<huffman_encode_info*>(pImpl);
 
 #ifndef NDEBUG
-    printf("orig = %d, enc = %d\n", nLen, (pImpl->m_encBitSize + 7) / 8);
+    printf("orig = %lu, enc = %lu\n", nLen, (pImpl->m_encBitSize + 7) / 8);
     {
         std::vector<char> outVec;
         bool b = decode_to_vec(&outVec, pInfo);
